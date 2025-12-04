@@ -6,26 +6,25 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+# SAM 3 Checkpoint Download Script
+# SAM 3 checkpoints are hosted on HuggingFace and require authentication.
 
-# Define the URLs for the checkpoints
-BASE_URL="https://dl.fbaipublicfiles.com/segment_anything_2/072824/"
-sam2_hiera_t_url="${BASE_URL}sam2_hiera_tiny.pt"
-sam2_hiera_s_url="${BASE_URL}sam2_hiera_small.pt"
-sam2_hiera_b_plus_url="${BASE_URL}sam2_hiera_base_plus.pt"
-sam2_hiera_l_url="${BASE_URL}sam2_hiera_large.pt"
-
-
-# Download each of the four checkpoints using wget
-echo "Downloading sam2_hiera_tiny.pt checkpoint..."
-wget $sam2_hiera_t_url || { echo "Failed to download checkpoint from $sam2_hiera_t_url"; exit 1; }
-
-echo "Downloading sam2_hiera_small.pt checkpoint..."
-wget $sam2_hiera_s_url || { echo "Failed to download checkpoint from $sam2_hiera_s_url"; exit 1; }
-
-echo "Downloading sam2_hiera_base_plus.pt checkpoint..."
-wget $sam2_hiera_b_plus_url || { echo "Failed to download checkpoint from $sam2_hiera_b_plus_url"; exit 1; }
-
-echo "Downloading sam2_hiera_large.pt checkpoint..."
-wget $sam2_hiera_l_url || { echo "Failed to download checkpoint from $sam2_hiera_l_url"; exit 1; }
-
-echo "All checkpoints are downloaded successfully."
+echo "SAM 3 Checkpoint Setup Instructions"
+echo "===================================="
+echo ""
+echo "SAM 3 checkpoints are hosted on HuggingFace at: facebook/sam3"
+echo ""
+echo "To download checkpoints:"
+echo ""
+echo "1. Request access to the model at:"
+echo "   https://huggingface.co/facebook/sam3"
+echo ""
+echo "2. Login to HuggingFace CLI:"
+echo "   pip install huggingface_hub"
+echo "   huggingface-cli login"
+echo ""
+echo "3. The model will be automatically downloaded when you first run the predictor"
+echo "   OR you can pre-download with:"
+echo "   python -c \"from huggingface_hub import snapshot_download; snapshot_download('facebook/sam3')\""
+echo ""
+echo "For Cog deployments, set the HF_TOKEN environment variable with your HuggingFace token."

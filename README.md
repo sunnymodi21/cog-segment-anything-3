@@ -1,139 +1,113 @@
-# SAM 2: Segment Anything in Images and Videos
+# SAM 3: Segment Anything with Concepts
 
 **[AI at Meta, FAIR](https://ai.meta.com/research/)**
 
-[Nikhila Ravi](https://nikhilaravi.com/), [Valentin Gabeur](https://gabeur.github.io/), [Yuan-Ting Hu](https://scholar.google.com/citations?user=E8DVVYQAAAAJ&hl=en), [Ronghang Hu](https://ronghanghu.com/), [Chaitanya Ryali](https://scholar.google.com/citations?user=4LWx24UAAAAJ&hl=en), [Tengyu Ma](https://scholar.google.com/citations?user=VeTSl0wAAAAJ&hl=en), [Haitham Khedr](https://hkhedr.com/), [Roman Rädle](https://scholar.google.de/citations?user=Tpt57v0AAAAJ&hl=en), [Chloe Rolland](https://scholar.google.com/citations?hl=fr&user=n-SnMhoAAAAJ), [Laura Gustafson](https://scholar.google.com/citations?user=c8IpF9gAAAAJ&hl=en), [Eric Mintun](https://ericmintun.github.io/), [Junting Pan](https://junting.github.io/), [Kalyan Vasudev Alwala](https://scholar.google.co.in/citations?user=m34oaWEAAAAJ&hl=en), [Nicolas Carion](https://www.nicolascarion.com/), [Chao-Yuan Wu](https://chaoyuan.org/), [Ross Girshick](https://www.rossgirshick.info/), [Piotr Dollár](https://pdollar.github.io/), [Christoph Feichtenhofer](https://feichtenhofer.github.io/)
+[[`Paper`](https://ai.meta.com/research/publications/sam-3-segment-anything-with-concepts/)] [[`Project`](https://ai.meta.com/sam3)] [[`GitHub`](https://github.com/facebookresearch/sam3)] [[`API`](https://replicate.com/lucataco/segment-anything-3)]
 
-[[`Paper`](https://ai.meta.com/research/publications/sam-2-segment-anything-in-images-and-videos/)] [[`Project`](https://ai.meta.com/sam2)] [[`Demo`](https://sam2.metademolab.com/)] [[`API`](https://replicate.com/lucataco/segment-anything-2)] [[`Dataset`](https://ai.meta.com/datasets/segment-anything-video)] [[`Blog`](https://ai.meta.com/blog/segment-anything-2)] [[`BibTeX`](#citing-sam-2)]
+## Overview
 
-![SAM 2 architecture](assets/model_diagram.png?raw=true)
+**Segment Anything Model 3 (SAM 3)** is a foundation model for open-vocabulary segmentation in images and videos. Unlike SAM 2 which relied on point/box prompts, SAM 3 introduces **text-based prompting** allowing you to segment objects by describing them in natural language.
 
-**Segment Anything Model 2 (SAM 2)** is a foundation model towards solving promptable visual segmentation in images and videos. We extend SAM to video by considering images as a video with a single frame. The model design is a simple transformer architecture with streaming memory for real-time video processing. We build a model-in-the-loop data engine, which improves model and data via user interaction, to collect [**our SA-V dataset**](https://ai.meta.com/datasets/segment-anything-video), the largest video segmentation dataset to date. SAM 2 trained on our data provides strong performance across a wide range of tasks and visual domains.
+### Key Features
 
-![SA-V dataset](assets/sa_v_dataset.jpg?raw=true)
+- **Open-vocabulary segmentation**: Segment any concept using text prompts (e.g., "person in red shirt", "dog playing with ball")
+- **270K unique concepts**: Supports over 50x more concepts than existing systems
+- **Presence tokens**: Better discrimination between similar text prompts
+- **848M parameters**: Larger model with improved accuracy
+- **Image and video support**: Works on both static images and video sequences
 
-## Installation
+## Cog Deployment
 
-Please install SAM 2 on a GPU machine using:
+This repository provides a [Cog](https://cog.run) wrapper for deploying SAM 3 as an API.
+
+### Requirements
+
+- Python 3.12+
+- PyTorch 2.7+
+- CUDA 12.6+
+- HuggingFace account with access to `facebook/sam3`
+
+### Setup
+
+1. **Request model access**: Visit [HuggingFace](https://huggingface.co/facebook/sam3) and request access to the SAM 3 checkpoints.
+
+2. **Set HuggingFace token**: Export your HF token as an environment variable:
+   ```bash
+   export HF_TOKEN=your_huggingface_token
+   ```
+
+3. **Build the Cog image**:
+   ```bash
+   cog build
+   ```
+
+4. **Run predictions**:
+   ```bash
+   cog predict -i image=@input.jpg -i prompt="person"
+   ```
+
+### API Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `image` | Path | required | Input image to segment |
+| `prompt` | string | None | Text describing what to segment (e.g., "car", "person in blue") |
+| `mask_limit` | int | -1 | Maximum masks to return (-1 for all) |
+| `score_threshold` | float | 0.5 | Minimum confidence score (0.0-1.0) |
+| `output_boxes` | bool | False | Include bounding box coordinates in filenames |
+
+### Example Usage
 
 ```bash
-git clone git@github.com:facebookresearch/segment-anything-2.git
+# Segment all people in an image
+cog predict -i image=@photo.jpg -i prompt="person"
 
-cd segment-anything-2; pip install -e .
+# Segment a specific object
+cog predict -i image=@street.jpg -i prompt="red car"
+
+# Get top 5 masks with high confidence
+cog predict -i image=@scene.jpg -i prompt="dog" -i mask_limit=5 -i score_threshold=0.7
 ```
 
-To use the SAM 2 predictor and run the example notebooks, `jupyter` and `matplotlib` are required and can be installed by:
+### Output
 
-```bash
-pip install -e ".[demo]"
-```
+Returns a list of PNG mask files, sorted by confidence score. Each mask is a binary image where white (255) indicates the segmented region.
 
-## Getting Started
+## Model Architecture
 
-### Download Checkpoints
+SAM 3 comprises 848M parameters featuring:
 
-First, we need to download a model checkpoint. All the model checkpoints can be downloaded by running:
+- **Shared vision encoder**: Between detector and tracker components
+- **DETR-based detector**: Conditioned on text, geometry, and image exemplars
+- **SAM 2 transformer encoder-decoder**: For video processing and interactive refinement
+- **Presence token**: Novel mechanism for discriminating related text prompts
 
-```bash
-cd checkpoints
-./download_ckpts.sh
-```
+## Migration from SAM 2
 
-or individually from:
+If you're migrating from SAM 2, note these key changes:
 
-- [sam2_hiera_tiny.pt](https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt)
-- [sam2_hiera_small.pt](https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_small.pt)
-- [sam2_hiera_base_plus.pt](https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_base_plus.pt)
-- [sam2_hiera_large.pt](https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_large.pt)
-
-Then SAM 2 can be used in a few lines as follows for image and video prediction.
-
-### Image prediction
-
-SAM 2 has all the capabilities of [SAM](https://github.com/facebookresearch/segment-anything) on static images, and we provide image prediction APIs that closely resemble SAM for image use cases. The `SAM2ImagePredictor` class has an easy interface for image prompting.
-
-```python
-import torch
-from sam2.build_sam import build_sam2
-from sam2.sam2_image_predictor import SAM2ImagePredictor
-
-checkpoint = "./checkpoints/sam2_hiera_large.pt"
-model_cfg = "sam2_hiera_l.yaml"
-predictor = SAM2ImagePredictor(build_sam2(model_cfg, checkpoint))
-
-with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-    predictor.set_image(<your_image>)
-    masks, _, _ = predictor.predict(<input_prompts>)
-```
-
-Please refer to the examples in [image_predictor_example.ipynb](./notebooks/image_predictor_example.ipynb) for static image use cases.
-
-SAM 2 also supports automatic mask generation on images just like SAM. Please see [automatic_mask_generator_example.ipynb](./notebooks/automatic_mask_generator_example.ipynb) for automatic mask generation in images.
-
-### Video prediction
-
-For promptable segmentation and tracking in videos, we provide a video predictor with APIs for example to add prompts and propagate masklets throughout a video. SAM 2 supports video inference on multiple objects and uses an inference state to keep track of the interactions in each video.
-
-```python
-import torch
-from sam2.build_sam import build_sam2_video_predictor
-
-checkpoint = "./checkpoints/sam2_hiera_large.pt"
-model_cfg = "sam2_hiera_l.yaml"
-predictor = build_sam2_video_predictor(model_cfg, checkpoint)
-
-with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-    state = predictor.init_state(<your_video>)
-
-    # add new prompts and instantly get the output on the same frame
-    frame_idx, object_ids, masks = predictor.add_new_points(state, <your prompts>):
-
-    # propagate the prompts to get masklets throughout the video
-    for frame_idx, object_ids, masks in predictor.propagate_in_video(state):
-        ...
-```
-
-Please refer to the examples in [video_predictor_example.ipynb](./notebooks/video_predictor_example.ipynb) for details on how to add prompts, make refinements, and track multiple objects in videos.
-
-## Model Description
-
-|      **Model**       | **Size (M)** |    **Speed (FPS)**     | **SA-V test (J&F)** | **MOSE val (J&F)** | **LVOS v2 (J&F)** |
-| :------------------: | :----------: | :--------------------: | :-----------------: | :----------------: | :---------------: |
-|   sam2_hiera_tiny    |     38.9     |          47.2          |        75.0         |        70.9        |       75.3        |
-|   sam2_hiera_small   |      46      | 43.3 (53.0 compiled\*) |        74.9         |        71.5        |       76.4        |
-| sam2_hiera_base_plus |     80.8     | 34.8 (43.8 compiled\*) |        74.7         |        72.8        |       75.8        |
-|   sam2_hiera_large   |    224.4     | 24.2 (30.2 compiled\*) |        76.0         |        74.6        |       79.8        |
-
-\* Compile the model by setting `compile_image_encoder: True` in the config.
-
-## Segment Anything Video Dataset
-
-See [sav_dataset/README.md](sav_dataset/README.md) for details.
+| SAM 2 | SAM 3 |
+|-------|-------|
+| Point/box prompts | Text prompts (primary) |
+| `SAM2AutomaticMaskGenerator` | `Sam3Processor` |
+| Direct checkpoint download | HuggingFace Hub |
+| `points_per_side` parameter | Replaced by text prompts |
+| Python 3.10 | Python 3.12+ |
+| PyTorch 2.3 | PyTorch 2.7+ |
+| CUDA 12.1 | CUDA 12.6+ |
 
 ## License
 
-The models are licensed under the [Apache 2.0 license](./LICENSE). Please refer to our research paper for more details on the models.
+The models are licensed under the [Apache 2.0 license](./LICENSE).
 
-## Contributing
+## Citing SAM 3
 
-See [contributing](CONTRIBUTING.md) and the [code of conduct](CODE_OF_CONDUCT.md).
-
-## Contributors
-
-The SAM 2 project was made possible with the help of many contributors (alphabetical):
-
-Karen Bergan, Daniel Bolya, Alex Bosenberg, Kai Brown, Vispi Cassod, Christopher Chedeau, Ida Cheng, Luc Dahlin, Shoubhik Debnath, Rene Martinez Doehner, Grant Gardner, Sahir Gomez, Rishi Godugu, Baishan Guo, Caleb Ho, Andrew Huang, Somya Jain, Bob Kamma, Amanda Kallet, Jake Kinney, Alexander Kirillov, Shiva Koduvayur, Devansh Kukreja, Robert Kuo, Aohan Lin, Parth Malani, Jitendra Malik, Mallika Malhotra, Miguel Martin, Alexander Miller, Sasha Mitts, William Ngan, George Orlin, Joelle Pineau, Kate Saenko, Rodrick Shepard, Azita Shokrpour, David Soofian, Jonathan Torres, Jenny Truong, Sagar Vaze, Meng Wang, Claudette Ward, Pengchuan Zhang.
-
-Third-party code: we use a GPU-based connected component algorithm adapted from [`cc_torch`](https://github.com/zsef123/Connected_components_PyTorch) (with its license in [`LICENSE_cctorch`](./LICENSE_cctorch)) as an optional post-processing step for the mask predictions.
-
-## Citing SAM 2
-
-If you use SAM 2 or the SA-V dataset in your research, please use the following BibTeX entry.
+If you use SAM 3 in your research, please cite:
 
 ```bibtex
-@article{ravi2024sam2,
-  title={SAM 2: Segment Anything in Images and Videos},
-  author={Ravi, Nikhila and Gabeur, Valentin and Hu, Yuan-Ting and Hu, Ronghang and Ryali, Chaitanya and Ma, Tengyu and Khedr, Haitham and R{\"a}dle, Roman and Rolland, Chloe and Gustafson, Laura and Mintun, Eric and Pan, Junting and Alwala, Kalyan Vasudev and Carion, Nicolas and Wu, Chao-Yuan and Girshick, Ross and Doll{\'a}r, Piotr and Feichtenhofer, Christoph},
+@article{sam3,
+  title={SAM 3: Segment Anything with Concepts},
+  author={Meta AI Research},
   journal={arXiv preprint},
   year={2024}
 }

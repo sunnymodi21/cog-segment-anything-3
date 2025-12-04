@@ -1,108 +1,137 @@
 # Prediction interface for Cog ⚙️
 # https://cog.run/python
+# SAM3 - Segment Anything with Concepts
 
 from cog import BasePredictor, Input, Path
 import os
 import cv2
 import sys
-import time
 import torch
-import subprocess
 import numpy as np
 from PIL import Image
-from typing import List
-# Add /tmp/sa2 to sys path
-sys.path.extend("/sa2")
-from sam2.build_sam import build_sam2
-from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
+from typing import List, Optional
 
-WEIGHTS_CACHE = "checkpoints"
-MODEL_NAME = "sam2_hiera_large.pt"
-WEIGHTS_URL = "https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_large.pt"
+# Add SAM3 to sys path
+sys.path.insert(0, "/sam3")
 
-def download_weights(url, dest):
-    start = time.time()
-    print("downloading url: ", url)
-    print("downloading to: ", dest)
-    subprocess.check_call(["wget", "-O", dest, url], close_fds=False)
-    print("downloading took: ", time.time() - start)
+from sam3.model_builder import build_sam3_image_model
+from sam3.model.sam3_image_processor import Sam3Processor
+
 
 class Predictor(BasePredictor):
     def setup(self) -> None:
-        """Load the model into memory to make running multiple predictions efficient"""
-        os.chdir("/sa2")
-        # Get path to model
-        model_cfg = "sam2_hiera_l.yaml"
-        model_path = WEIGHTS_CACHE + "/" +MODEL_NAME
-        # Download weights
-        if not os.path.exists(model_path):
-            download_weights(WEIGHTS_URL, model_path)
-        # Setup SAM2
-        self.sam2 = build_sam2(config_file=model_cfg, ckpt_path=model_path, device='cuda', apply_postprocessing=False)
-        # turn on tfloat32 for Ampere GPUs
+        """Load the SAM3 model into memory to make running multiple predictions efficient"""
+        os.chdir("/sam3")
+
+        # HuggingFace authentication (if token provided via environment)
+        hf_token = os.environ.get("HF_TOKEN")
+        if hf_token:
+            from huggingface_hub import login
+            login(token=hf_token)
+
+        # Build SAM3 model
+        self.model = build_sam3_image_model()
+        self.processor = Sam3Processor(self.model)
+
+        # Enable CUDA optimizations
         torch.autocast(device_type="cuda", dtype=torch.bfloat16).__enter__()
         if torch.cuda.get_device_properties(0).major >= 8:
+            # Turn on tfloat32 for Ampere GPUs
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
 
     def predict(
         self,
-        image: Path = Input(description="Input image"),
+        image: Path = Input(description="Input image to segment"),
+        prompt: str = Input(
+            default=None,
+            description="Text prompt describing what to segment (e.g., 'person', 'car', 'dog playing with ball'). Supports open-vocabulary concepts."
+        ),
         mask_limit: int = Input(
-            default=-1, description="maximum number of masks to return. If -1 or None, all masks will be returned. NOTE: The masks are sorted by predicted_iou."),
-        points_per_side: int = Input(
-            default=64, description="The number of points to be sampled along one side of the image."),
-        points_per_batch: int = Input(
-            default=128, description="Sets the number of points run simultaneously by the model"),
-        pred_iou_thresh: float = Input(
-            default=0.7, description="A filtering threshold in [0,1], using the model's predicted mask quality."),
-        stability_score_thresh: float = Input(
-            default=0.92, description="A filtering threshold in [0,1], using the stability of the mask under changes to the cutoff used to binarize the model's mask predictions."),
-        stability_score_offset: float = Input(
-            default=0.7, description="The amount to shift the cutoff when calculated the stability score."),
-        crop_n_layers: int = Input(
-            default=1, description="If >0, mask prediction will be run again on crops of the image"),
-        box_nms_thresh: float = Input(
-            default=0.7, description="The box IoU cutoff used by non-maximal suppression to filter duplicate masks."),
-        crop_n_points_downscale_factor: int = Input(
-            default=2, description="The number of points-per-side sampled in layer n is scaled down by crop_n_points_downscale_factor**n."),
-        min_mask_region_area: float = Input(
-            default=25.0, description="If >0, postprocessing will be applied to remove disconnected regions and holes in masks with area smaller than min_mask_region_area."),
-        mask_2_mask: bool = Input(
-            default=True, description="Whether to add a one step refinement using previous mask predictions."),
-        multimask_output: bool = Input(
-            default=False, description="Whether to output multimask at each point of the grid."),
+            default=-1,
+            description="Maximum number of masks to return. -1 returns all masks. Masks are sorted by confidence score."
+        ),
+        score_threshold: float = Input(
+            default=0.5,
+            ge=0.0,
+            le=1.0,
+            description="Minimum confidence score threshold for returned masks (0.0-1.0)."
+        ),
+        output_boxes: bool = Input(
+            default=False,
+            description="If True, also outputs bounding box coordinates in the filename."
+        ),
     ) -> List[Path]:
-        """Run a single prediction on the model"""
-        # Convert input image
-        image_rgb = Image.open(image).convert('RGB')
-        image_arr = np.array(image_rgb)
+        """Run SAM3 segmentation on the input image.
 
-        # Setup the predictor and image
-        mask_generator = SAM2AutomaticMaskGenerator(
-            model=self.sam2,
-            points_per_side=points_per_side,
-            points_per_batch=points_per_batch,
-            pred_iou_thresh=pred_iou_thresh,
-            stability_score_thresh=stability_score_thresh,
-            stability_score_offset=stability_score_offset,
-            crop_n_layers=crop_n_layers,
-            box_nms_thresh=box_nms_thresh,
-            crop_n_points_downscale_factor=crop_n_points_downscale_factor,
-            min_mask_region_area=min_mask_region_area,
-            use_m2m=mask_2_mask,
-            multimask_output=multimask_output,
-        )
-        sam_output = mask_generator.generate(image_arr)
-        # Sort masks by `predicted_iou`
-        masks = [mask['segmentation'] for mask in sorted(sam_output, key=lambda x: x['predicted_iou'], reverse=True)]
+        SAM3 supports open-vocabulary segmentation with text prompts,
+        allowing you to segment specific concepts like 'person in red shirt'
+        or 'dog' without needing point or box prompts.
+        """
+        # Load and convert image
+        image_pil = Image.open(image).convert('RGB')
 
-        # Save the masks + mased to files
+        # Set image in processor - this caches the image embeddings
+        inference_state = self.processor.set_image(image_pil)
+
+        # Generate masks based on prompt
+        if prompt:
+            # Text-based segmentation (SAM3's primary mode)
+            output = self.processor.set_text_prompt(
+                state=inference_state,
+                prompt=prompt
+            )
+        else:
+            # If no prompt provided, attempt to segment all objects
+            # This may use a default "all objects" prompt internally
+            output = self.processor.set_text_prompt(
+                state=inference_state,
+                prompt="all objects"
+            )
+
+        masks = output.get("masks", [])
+        scores = output.get("scores", [])
+        boxes = output.get("boxes", [])
+
+        if len(masks) == 0:
+            return []
+
+        # Convert to numpy if tensors
+        if torch.is_tensor(masks):
+            masks = masks.cpu().numpy()
+        if torch.is_tensor(scores):
+            scores = scores.cpu().numpy()
+        if torch.is_tensor(boxes):
+            boxes = boxes.cpu().numpy()
+
+        # Filter by score threshold
+        valid_indices = [i for i, s in enumerate(scores) if s >= score_threshold]
+
+        # Sort by score (highest first) and apply limit
+        sorted_indices = sorted(valid_indices, key=lambda i: scores[i], reverse=True)
+        if mask_limit > 0:
+            sorted_indices = sorted_indices[:mask_limit]
+
+        # Save masks to files
         return_masks = []
-        for i, mask in enumerate(masks[:mask_limit]):
-            # create a binary mask from the boolean array
-            mask_image = np.uint8(mask) * 255
-            mask_filename = f"/tmp/mask_{i}.png"
+        for idx, i in enumerate(sorted_indices):
+            mask = masks[i]
+
+            # Handle different mask shapes (could be HxW or 1xHxW)
+            if mask.ndim == 3:
+                mask = mask.squeeze(0)
+
+            # Create binary mask image
+            mask_image = np.uint8(mask > 0.5) * 255
+
+            # Generate filename
+            if output_boxes and len(boxes) > i:
+                box = boxes[i]
+                mask_filename = f"/tmp/mask_{idx}_score{scores[i]:.3f}_box{int(box[0])}_{int(box[1])}_{int(box[2])}_{int(box[3])}.png"
+            else:
+                mask_filename = f"/tmp/mask_{idx}.png"
+
             cv2.imwrite(mask_filename, mask_image)
-            return_masks.append(Path(f"/tmp/mask_{i}.png"))
+            return_masks.append(Path(mask_filename))
+
         return return_masks
