@@ -19,6 +19,7 @@ build:
      - "opencv-python>=4.7.0"
      - "ninja"
      - "huggingface_hub"
+     - "decord"
   run:
     - git clone https://github.com/facebookresearch/sam3.git /sam3
     - cd /sam3 && CUDA_SELECT_NVCC_ARCH_FLAGS="8.0;8.6;9.0" TORCH_CUDA_ARCH_LIST="8.0;8.6;9.0" CUDA_ARCH_LIST="8.0;8.6;9.0" CUDA_HOME=/usr/local/cuda pip install -e .
